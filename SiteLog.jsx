@@ -23,6 +23,14 @@ const SiteLog = () => {
     verified: false,
   });
 
+  // Employee task state
+  const [employeeNewTask, setEmployeeNewTask] = useState({
+    taskName: '',
+    timeMinutes: 10,
+    date: new Date().toISOString().split('T')[0],
+    scope: 'out-of-scope',
+  });
+
   // Initialize Firebase
   useEffect(() => {
     const storedConfig = localStorage.getItem('firebaseConfig');
@@ -32,6 +40,13 @@ const SiteLog = () => {
       setAppState('modeSelect');
     }
   }, []);
+
+  // Update default employee when employees list changes
+  useEffect(() => {
+    if (employees.length > 0 && !newTask.employee) {
+      setNewTask(prev => ({ ...prev, employee: employees[0] }));
+    }
+  }, [employees]);
 
   const loadDataFromFirebase = async (config) => {
     try {
@@ -43,11 +58,17 @@ const SiteLog = () => {
       setDatabase(dbRef);
 
       onValue(ref(dbRef, 'config/supervisorName'), (snapshot) => {
-        if (snapshot.exists()) setSupervisorName(snapshot.val());
+        if (snapshot.exists()) {
+          const name = snapshot.val();
+          setSupervisorName(name);
+        }
       });
 
       onValue(ref(dbRef, 'config/employees'), (snapshot) => {
-        if (snapshot.exists()) setEmployees(snapshot.val());
+        if (snapshot.exists()) {
+          const emps = snapshot.val();
+          setEmployees(emps);
+        }
       });
 
       onValue(ref(dbRef, 'tasks'), (snapshot) => {
@@ -57,6 +78,8 @@ const SiteLog = () => {
             tasksArray.push({ id: child.key, ...child.val() });
           });
           setTasks(tasksArray);
+        } else {
+          setTasks([]);
         }
       });
     } catch (error) {
@@ -120,6 +143,10 @@ const SiteLog = () => {
 
   const addTask = async () => {
     if (!newTask.taskName.trim()) return;
+    if (!newTask.employee) {
+      alert('Please select an employee');
+      return;
+    }
     const taskId = Date.now().toString();
     await saveToFirebase(`tasks/${taskId}`, {
       ...newTask,
@@ -133,6 +160,27 @@ const SiteLog = () => {
       date: new Date().toISOString().split('T')[0],
       scope: 'out-of-scope',
       verified: false,
+    });
+  };
+
+  const handleEmployeeAddTask = async () => {
+    if (!employeeNewTask.taskName.trim()) return;
+    const taskId = Date.now().toString();
+    await saveToFirebase(`tasks/${taskId}`, {
+      taskName: employeeNewTask.taskName,
+      employee: selectedEmployeeView,
+      timeMinutes: employeeNewTask.timeMinutes,
+      date: employeeNewTask.date,
+      scope: employeeNewTask.scope,
+      verified: false,
+      createdAt: new Date().toISOString(),
+      loggedByEmployee: true
+    });
+    setEmployeeNewTask({
+      taskName: '',
+      timeMinutes: 10,
+      date: new Date().toISOString().split('T')[0],
+      scope: 'out-of-scope',
     });
   };
 
@@ -392,6 +440,7 @@ const SiteLog = () => {
                   onChange={(e) => setNewTask({ ...newTask, employee: e.target.value })}
                   style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
+                  <option value="">Select employee</option>
                   {employees.map(emp => (
                     <option key={emp} value={emp}>{emp}</option>
                   ))}
@@ -493,38 +542,12 @@ const SiteLog = () => {
 
   // EMPLOYEE VIEW
   if (appState === 'employee') {
-    const [employeeNewTask, setEmployeeNewTask] = useState({
-      taskName: '',
-      timeMinutes: 10,
-      date: new Date().toISOString().split('T')[0],
-      scope: 'out-of-scope',
-    });
-
-    const handleEmployeeAddTask = async () => {
-      if (!employeeNewTask.taskName.trim()) return;
-      const taskId = Date.now().toString();
-      await saveToFirebase(`tasks/${taskId}`, {
-        taskName: employeeNewTask.taskName,
-        employee: selectedEmployeeView,
-        timeMinutes: employeeNewTask.timeMinutes,
-        date: employeeNewTask.date,
-        scope: employeeNewTask.scope,
-        verified: false,
-        createdAt: new Date().toISOString(),
-        loggedByEmployee: true
-      });
-      setEmployeeNewTask({
-        taskName: '',
-        timeMinutes: 10,
-        date: new Date().toISOString().split('T')[0],
-        scope: 'out-of-scope',
-      });
-    };
+    const employeeTasks = tasks.filter(t => t.employee === selectedEmployeeView);
 
     return (
       <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
         <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 10 }}>
-          <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a202c', margin: 0 }}>SiteLog</h1>
               <p style={{ fontSize: '12px', color: '#718096', margin: '4px 0 0 0' }}>{selectedEmployeeView}</p>
@@ -541,7 +564,7 @@ const SiteLog = () => {
           </div>
         </div>
 
-        <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
           {/* Log Time Form */}
           <div style={{ background: 'white', border: '2px solid #48bb78', borderRadius: '10px', padding: '24px' }}>
             <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Log Your Time</h2>
@@ -590,31 +613,29 @@ const SiteLog = () => {
 
           {/* Tasks List */}
           <div>
-            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Your Tasks</h2>
-            {tasks.filter(t => t.employee === selectedEmployeeView).length === 0 ? (
+            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Your Tasks ({employeeTasks.length})</h2>
+            {employeeTasks.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#718096', padding: '32px 0', margin: 0 }}>No tasks assigned yet</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {tasks
-                  .filter(t => t.employee === selectedEmployeeView)
-                  .map(task => (
-                    <div key={task.id} style={{ background: 'white', borderLeft: '4px solid #48bb78', borderRadius: '6px', padding: '16px' }}>
-                      <p style={{ fontWeight: '600', color: '#1a202c', margin: '0 0 8px 0', fontSize: '14px' }}>{task.taskName}</p>
-                      <div style={{ fontSize: '12px', color: '#718096', lineHeight: '1.6' }}>
-                        <p style={{ margin: '4px 0' }}><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
-                        <p style={{ margin: '4px 0' }}><strong>Date:</strong> {task.date}</p>
-                        <p style={{ margin: '4px 0' }}>
-                          <strong>Scope:</strong> 
-                          <span style={{ marginLeft: '4px', fontWeight: '600', color: task.scope === 'in-scope' ? '#22863a' : '#d97706' }}>
-                            {task.scope === 'in-scope' ? 'In-Scope' : 'Out-of-Scope'}
-                          </span>
-                        </p>
-                        {task.loggedByEmployee && (
-                          <p style={{ margin: '4px 0', color: '#667eea' }}>✓ You logged this</p>
-                        )}
-                      </div>
+                {employeeTasks.map(task => (
+                  <div key={task.id} style={{ background: 'white', borderLeft: '4px solid #48bb78', borderRadius: '6px', padding: '16px' }}>
+                    <p style={{ fontWeight: '600', color: '#1a202c', margin: '0 0 8px 0', fontSize: '14px' }}>{task.taskName}</p>
+                    <div style={{ fontSize: '12px', color: '#718096', lineHeight: '1.6' }}>
+                      <p style={{ margin: '4px 0' }}><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
+                      <p style={{ margin: '4px 0' }}><strong>Date:</strong> {task.date}</p>
+                      <p style={{ margin: '4px 0' }}>
+                        <strong>Scope:</strong> 
+                        <span style={{ marginLeft: '4px', fontWeight: '600', color: task.scope === 'in-scope' ? '#22863a' : '#d97706' }}>
+                          {task.scope === 'in-scope' ? 'In-Scope' : 'Out-of-Scope'}
+                        </span>
+                      </p>
+                      {task.loggedByEmployee && (
+                        <p style={{ margin: '4px 0', color: '#667eea' }}>✓ You logged this</p>
+                      )}
                     </div>
-                  ))}
+                  </div>
+                ))}
               </div>
             )}
           </div>

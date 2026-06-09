@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Plus, Trash2, CheckCircle, Circle, Settings, LogOut } from 'lucide-react';
+import { Download, Plus, Trash2, CheckCircle, Circle, LogOut } from 'lucide-react';
 
 const SiteLog = () => {
   const [firebaseConfigured, setFirebaseConfigured] = useState(false);
-  const [firebaseConfig, setFirebaseConfig] = useState(null);
   const [database, setDatabase] = useState(null);
   
-  const [appState, setAppState] = useState('setup'); // setup, modeSelect, supervisor, employee
+  const [appState, setAppState] = useState('setup');
   const [supervisorName, setSupervisorName] = useState('');
   const [employees, setEmployees] = useState([]);
   const [newEmployeeName, setNewEmployeeName] = useState('');
@@ -26,62 +25,36 @@ const SiteLog = () => {
 
   // Initialize Firebase
   useEffect(() => {
-    const initFirebase = async () => {
-      try {
-        const firebase = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js');
-        const db = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
-        
-        // Check if config is stored in localStorage
-        const storedConfig = localStorage.getItem('firebaseConfig');
-        if (storedConfig) {
-          const config = JSON.parse(storedConfig);
-          const app = firebase.initializeApp(config);
-          const dbRef = db.getDatabase(app);
-          setDatabase(dbRef);
-          setFirebaseConfig(config);
-          setFirebaseConfigured(true);
-          
-          // Load existing data
-          loadDataFromFirebase(dbRef);
-          setAppState('modeSelect');
-        }
-      } catch (error) {
-        console.log('Firebase setup ready. Add config when prompted.');
-      }
-    };
-    initFirebase();
+    const storedConfig = localStorage.getItem('firebaseConfig');
+    if (storedConfig) {
+      setFirebaseConfigured(true);
+      loadDataFromFirebase(JSON.parse(storedConfig));
+      setAppState('modeSelect');
+    }
   }, []);
 
-  const loadDataFromFirebase = async (dbRef) => {
+  const loadDataFromFirebase = async (config) => {
     try {
-      const db = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
+      const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js');
+      const { getDatabase, ref, onValue } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
       
-      // Load supervisor name
-      const supervisorRef = db.ref(dbRef, 'config/supervisorName');
-      db.onValue(supervisorRef, (snapshot) => {
-        if (snapshot.exists()) {
-          setSupervisorName(snapshot.val());
-        }
+      const app = initializeApp(config);
+      const dbRef = getDatabase(app);
+      setDatabase(dbRef);
+
+      onValue(ref(dbRef, 'config/supervisorName'), (snapshot) => {
+        if (snapshot.exists()) setSupervisorName(snapshot.val());
       });
 
-      // Load employees
-      const employeesRef = db.ref(dbRef, 'config/employees');
-      db.onValue(employeesRef, (snapshot) => {
-        if (snapshot.exists()) {
-          setEmployees(snapshot.val());
-        }
+      onValue(ref(dbRef, 'config/employees'), (snapshot) => {
+        if (snapshot.exists()) setEmployees(snapshot.val());
       });
 
-      // Load tasks with real-time updates
-      const tasksRef = db.ref(dbRef, 'tasks');
-      db.onValue(tasksRef, (snapshot) => {
+      onValue(ref(dbRef, 'tasks'), (snapshot) => {
         if (snapshot.exists()) {
           const tasksArray = [];
-          snapshot.forEach((childSnapshot) => {
-            tasksArray.push({
-              id: childSnapshot.key,
-              ...childSnapshot.val()
-            });
+          snapshot.forEach((child) => {
+            tasksArray.push({ id: child.key, ...child.val() });
           });
           setTasks(tasksArray);
         }
@@ -94,9 +67,8 @@ const SiteLog = () => {
   const saveToFirebase = async (path, value) => {
     if (!database) return;
     try {
-      const db = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
-      const ref = db.ref(database, path);
-      await db.set(ref, value);
+      const { ref, set } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
+      await set(ref(database, path), value);
     } catch (error) {
       console.error('Error saving to Firebase:', error);
     }
@@ -104,15 +76,8 @@ const SiteLog = () => {
 
   const configureFirebase = (config) => {
     localStorage.setItem('firebaseConfig', JSON.stringify(config));
-    setFirebaseConfig(config);
     setFirebaseConfigured(true);
-    
-    const firebase = require('https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js');
-    const app = firebase.initializeApp(config);
-    const db = require('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
-    const dbRef = db.getDatabase(app);
-    setDatabase(dbRef);
-    loadDataFromFirebase(dbRef);
+    loadDataFromFirebase(config);
   };
 
   const completeSetup = async () => {
@@ -120,7 +85,6 @@ const SiteLog = () => {
       alert('Please set supervisor name and at least one employee');
       return;
     }
-    
     await saveToFirebase('config/supervisorName', supervisorName);
     await saveToFirebase('config/employees', employees);
     await saveToFirebase('config/password', supervisorPassword);
@@ -129,14 +93,13 @@ const SiteLog = () => {
 
   const addEmployee = () => {
     if (!newEmployeeName.trim()) return;
-    const updatedEmployees = [...employees, newEmployeeName];
-    setEmployees(updatedEmployees);
+    const updated = [...employees, newEmployeeName];
+    setEmployees(updated);
     setNewEmployeeName('');
   };
 
-  const removeEmployee = (index) => {
-    const updatedEmployees = employees.filter((_, i) => i !== index);
-    setEmployees(updatedEmployees);
+  const removeEmployee = (idx) => {
+    setEmployees(employees.filter((_, i) => i !== idx));
   };
 
   const supervisorLogin = () => {
@@ -157,16 +120,12 @@ const SiteLog = () => {
 
   const addTask = async () => {
     if (!newTask.taskName.trim()) return;
-    
     const taskId = Date.now().toString();
-    const taskData = {
+    await saveToFirebase(`tasks/${taskId}`, {
       ...newTask,
       id: taskId,
       createdAt: new Date().toISOString()
-    };
-
-    await saveToFirebase(`tasks/${taskId}`, taskData);
-    
+    });
     setNewTask({
       taskName: '',
       employee: employees[0] || '',
@@ -178,13 +137,13 @@ const SiteLog = () => {
   };
 
   const updateTask = async (taskId, field, value) => {
-    await saveToFirebase(`tasks/${taskId}/${field}`, value);
+    const { ref, update } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
+    await update(ref(database, `tasks/${taskId}`), { [field]: value });
   };
 
   const deleteTask = async (taskId) => {
-    const db = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
-    const ref = db.ref(database, `tasks/${taskId}`);
-    await db.remove(ref);
+    const { ref, remove } = await import('https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js');
+    await remove(ref(database, `tasks/${taskId}`));
   };
 
   const toggleVerify = async (taskId) => {
@@ -242,18 +201,18 @@ const SiteLog = () => {
   // SETUP VIEW
   if (appState === 'setup') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-          <h1 className="text-3xl font-bold text-blue-900 mb-2">SiteLog</h1>
-          <p className="text-blue-700 mb-6">Real-time team time tracking</p>
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 10px 40px rgba(0,0,0,0.15)', padding: '40px', maxWidth: '500px', width: '100%' }}>
+          <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#1a202c', margin: '0 0 8px 0' }}>SiteLog</h1>
+          <p style={{ fontSize: '14px', color: '#718096', marginBottom: '30px', margin: '0 0 30px 0' }}>Real-time team time tracking</p>
 
           {!firebaseConfigured ? (
-            <div className="space-y-4">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Firebase Config (JSON)</label>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#2d3748', marginBottom: '8px' }}>Firebase Config (JSON)</label>
                 <textarea
                   placeholder='{"apiKey": "...", "projectId": "...", ...}'
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-xs h-24 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '8px', fontSize: '12px', fontFamily: 'monospace', height: '100px', boxSizing: 'border-box' }}
                   onBlur={(e) => {
                     try {
                       const config = JSON.parse(e.target.value);
@@ -264,61 +223,59 @@ const SiteLog = () => {
                   }}
                 />
               </div>
-              <p className="text-xs text-gray-600">
-                Get this from Firebase Console → Project Settings → Web app config
-              </p>
+              <p style={{ fontSize: '12px', color: '#718096', margin: '0' }}>Get this from Firebase Console → Project Settings → Web app config</p>
             </div>
           ) : (
-            <div className="space-y-6">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Your Name (Supervisor)</label>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#2d3748', marginBottom: '8px' }}>Your Name (Supervisor)</label>
                 <input
                   type="text"
                   value={supervisorName}
                   onChange={(e) => setSupervisorName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
                   placeholder="e.g., John"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Supervisor Password</label>
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#2d3748', marginBottom: '8px' }}>Supervisor Password</label>
                 <input
                   type="password"
                   value={supervisorPassword}
                   onChange={(e) => setSupervisorPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
                   placeholder="Set a password"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Team Members</label>
-                <div className="space-y-2">
+                <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#2d3748', marginBottom: '12px' }}>Team Members</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
                   {employees.map((emp, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-blue-50 p-2 rounded">
-                      <span className="text-sm">{emp}</span>
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f7fafc', padding: '10px 12px', borderRadius: '6px' }}>
+                      <span style={{ fontSize: '14px', color: '#2d3748' }}>{emp}</span>
                       <button
                         onClick={() => removeEmployee(idx)}
-                        className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        style={{ fontSize: '12px', color: '#e53e3e', fontWeight: '600', background: 'none', border: 'none', cursor: 'pointer' }}
                       >
                         Remove
                       </button>
                     </div>
                   ))}
                 </div>
-                <div className="flex gap-2 mt-3">
+                <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="text"
                     value={newEmployeeName}
                     onChange={(e) => setNewEmployeeName(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && addEmployee()}
                     placeholder="Employee name"
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    style={{ flex: 1, padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
                   />
                   <button
                     onClick={addEmployee}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-md font-medium text-sm hover:bg-blue-700"
+                    style={{ padding: '10px 16px', background: '#667eea', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
                   >
                     Add
                   </button>
@@ -327,7 +284,7 @@ const SiteLog = () => {
 
               <button
                 onClick={completeSetup}
-                className="w-full bg-blue-600 text-white py-2 rounded-md font-medium hover:bg-blue-700 transition"
+                style={{ width: '100%', padding: '12px 16px', background: '#667eea', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}
               >
                 Start SiteLog
               </button>
@@ -341,44 +298,40 @@ const SiteLog = () => {
   // MODE SELECT VIEW
   if (appState === 'modeSelect') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-          <h1 className="text-3xl font-bold text-blue-900 mb-6 text-center">SiteLog</h1>
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 10px 40px rgba(0,0,0,0.15)', padding: '40px', maxWidth: '400px', width: '100%' }}>
+          <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#1a202c', textAlign: 'center', marginBottom: '30px', margin: '0 0 30px 0' }}>SiteLog</h1>
 
-          <div className="space-y-4">
-            <div className="border-2 border-blue-300 rounded-lg p-4">
-              <h2 className="font-semibold text-blue-900 mb-3">Supervisor Login</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ border: '2px solid #667eea', borderRadius: '10px', padding: '24px' }}>
+              <h2 style={{ fontWeight: '600', color: '#2d3748', marginBottom: '12px', margin: '0 0 12px 0', fontSize: '16px' }}>Supervisor Login</h2>
               <input
                 type="password"
                 value={enteredPassword}
                 onChange={(e) => setEnteredPassword(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && supervisorLogin()}
                 placeholder="Enter password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', marginBottom: '12px', fontSize: '13px', boxSizing: 'border-box' }}
               />
               <button
                 onClick={supervisorLogin}
-                className="w-full bg-blue-600 text-white py-2 rounded-md font-medium hover:bg-blue-700"
+                style={{ width: '100%', padding: '10px 16px', background: '#667eea', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
               >
                 Login as Supervisor
               </button>
             </div>
 
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">or</span>
-              </div>
+            <div style={{ textAlign: 'center', position: 'relative', margin: '16px 0' }}>
+              <div style={{ borderTop: '1px solid #cbd5e0' }}></div>
+              <span style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', background: 'white', padding: '0 12px', fontSize: '12px', color: '#718096' }}>or</span>
             </div>
 
-            <div className="border-2 border-green-300 rounded-lg p-4">
-              <h2 className="font-semibold text-green-900 mb-3">Employee Login</h2>
+            <div style={{ border: '2px solid #48bb78', borderRadius: '10px', padding: '24px' }}>
+              <h2 style={{ fontWeight: '600', color: '#2d3748', marginBottom: '12px', margin: '0 0 12px 0', fontSize: '16px' }}>Employee Login</h2>
               <select
                 value={selectedEmployeeView}
                 onChange={(e) => setSelectedEmployeeView(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md mb-3 focus:outline-none focus:ring-2 focus:ring-green-500"
+                style={{ width: '100%', padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', marginBottom: '12px', fontSize: '13px', boxSizing: 'border-box' }}
               >
                 <option value="">Select your name</option>
                 {employees.map((emp) => (
@@ -387,7 +340,7 @@ const SiteLog = () => {
               </select>
               <button
                 onClick={employeeLogin}
-                className="w-full bg-green-600 text-white py-2 rounded-md font-medium hover:bg-green-700"
+                style={{ width: '100%', padding: '10px 16px', background: '#48bb78', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
               >
                 Login as Employee
               </button>
@@ -401,43 +354,43 @@ const SiteLog = () => {
   // SUPERVISOR VIEW
   if (appState === 'supervisor') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
-          <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+      <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">SiteLog</h1>
-              <p className="text-xs text-slate-600">Supervisor: {supervisorName}</p>
+              <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a202c', margin: 0 }}>SiteLog</h1>
+              <p style={{ fontSize: '12px', color: '#718096', margin: '4px 0 0 0' }}>Supervisor: {supervisorName}</p>
             </div>
             <button
               onClick={() => {
                 setAppState('modeSelect');
                 setEnteredPassword('');
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 font-medium text-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: '#fed7d7', color: '#c53030', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
             >
               <LogOut size={16} /> Logout
             </button>
           </div>
         </div>
 
-        <div className="max-w-6xl mx-auto py-6 px-4 space-y-6">
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
           {/* Quick Entry Form */}
-          <div className="bg-white border-2 border-slate-200 rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-slate-900 mb-4">Log Task</h2>
-            <div className="space-y-4">
+          <div style={{ background: 'white', border: '2px solid #e2e8f0', borderRadius: '10px', padding: '24px', marginBottom: '24px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Log Task</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <input
                 type="text"
                 placeholder="Task description (e.g., 'Rewired panel')"
                 value={newTask.taskName}
                 onChange={(e) => setNewTask({ ...newTask, taskName: e.target.value })}
                 onKeyPress={(e) => e.key === 'Enter' && addTask()}
-                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
               />
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
                 <select
                   value={newTask.employee}
                   onChange={(e) => setNewTask({ ...newTask, employee: e.target.value })}
-                  className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
                   {employees.map(emp => (
                     <option key={emp} value={emp}>{emp}</option>
@@ -446,7 +399,7 @@ const SiteLog = () => {
                 <select
                   value={newTask.timeMinutes}
                   onChange={(e) => setNewTask({ ...newTask, timeMinutes: Number(e.target.value) })}
-                  className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
                   {[10, 20, 30, 40, 50, 60, 90, 120].map(min => (
                     <option key={min} value={min}>{min} min</option>
@@ -456,12 +409,12 @@ const SiteLog = () => {
                   type="date"
                   value={newTask.date}
                   onChange={(e) => setNewTask({ ...newTask, date: e.target.value })}
-                  className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 />
                 <select
                   value={newTask.scope}
                   onChange={(e) => setNewTask({ ...newTask, scope: e.target.value })}
-                  className="px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
                   <option value="in-scope">In-Scope</option>
                   <option value="out-of-scope">Out-of-Scope</option>
@@ -469,64 +422,62 @@ const SiteLog = () => {
               </div>
               <button
                 onClick={addTask}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md flex items-center justify-center gap-2 transition"
+                style={{ width: '100%', padding: '12px 16px', background: '#667eea', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
               >
                 <Plus size={18} /> Add Task
               </button>
             </div>
           </div>
 
-          {/* Tasks & Report */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-slate-900">All Tasks</h2>
+          {/* Tasks Section */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', margin: 0 }}>All Tasks</h2>
               <button
                 onClick={generateReport}
-                className="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md flex items-center gap-2 transition text-sm"
+                style={{ padding: '10px 16px', background: '#48bb78', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
               >
                 <Download size={16} /> Weekly Report
               </button>
             </div>
 
             {tasks.length === 0 ? (
-              <p className="text-center text-slate-500 py-8">No tasks logged yet</p>
+              <p style={{ textAlign: 'center', color: '#718096', padding: '32px 0', margin: 0 }}>No tasks logged yet</p>
             ) : (
-              <div className="space-y-2">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
                 {tasks.map(task => (
-                  <div key={task.id} className="bg-white border border-slate-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <p className="font-semibold text-slate-900">{task.taskName}</p>
-                        <div className="text-xs text-slate-600 mt-1 space-y-1">
-                          <p><strong>Employee:</strong> {task.employee}</p>
-                          <p><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
-                          <p><strong>Date:</strong> {task.date}</p>
-                          <p>
+                  <div key={task.id} style={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '12px' }}>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontWeight: '600', color: '#1a202c', margin: '0 0 8px 0', fontSize: '14px' }}>{task.taskName}</p>
+                        <div style={{ fontSize: '12px', color: '#718096', lineHeight: '1.6' }}>
+                          <p style={{ margin: '4px 0' }}><strong>Employee:</strong> {task.employee}</p>
+                          <p style={{ margin: '4px 0' }}><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
+                          <p style={{ margin: '4px 0' }}><strong>Date:</strong> {task.date}</p>
+                          <p style={{ margin: '4px 0' }}>
                             <strong>Scope:</strong> 
-                            <span className={`ml-1 font-medium ${task.scope === 'in-scope' ? 'text-green-600' : 'text-orange-600'}`}>
+                            <span style={{ marginLeft: '4px', fontWeight: '600', color: task.scope === 'in-scope' ? '#22863a' : '#d97706' }}>
                               {task.scope === 'in-scope' ? 'In-Scope' : 'Out-of-Scope'}
                             </span>
                           </p>
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div style={{ display: 'flex', gap: '8px' }}>
                         <button
                           onClick={() => toggleVerify(task.id)}
-                          className="p-2 hover:bg-slate-100 rounded-md transition"
-                          title={task.verified ? 'Mark unverified' : 'Mark verified'}
+                          style={{ padding: '6px', background: 'none', border: 'none', cursor: 'pointer' }}
                         >
                           {task.verified ? (
-                            <CheckCircle size={20} className="text-green-600" />
+                            <CheckCircle size={18} color="#22863a" />
                           ) : (
-                            <Circle size={20} className="text-slate-400" />
+                            <Circle size={18} color="#cbd5e0" />
                           )}
                         </button>
                         <button
                           onClick={() => deleteTask(task.id)}
-                          className="p-2 hover:bg-red-50 rounded-md transition"
-                          title="Delete task"
+                          style={{ padding: '6px', background: 'none', border: 'none', cursor: 'pointer' }}
                         >
-                          <Trash2 size={20} className="text-red-600" />
+                          <Trash2 size={18} color="#e53e3e" />
                         </button>
                       </div>
                     </div>
@@ -551,9 +502,8 @@ const SiteLog = () => {
 
     const handleEmployeeAddTask = async () => {
       if (!employeeNewTask.taskName.trim()) return;
-
       const taskId = Date.now().toString();
-      const taskData = {
+      await saveToFirebase(`tasks/${taskId}`, {
         taskName: employeeNewTask.taskName,
         employee: selectedEmployeeView,
         timeMinutes: employeeNewTask.timeMinutes,
@@ -562,10 +512,7 @@ const SiteLog = () => {
         verified: false,
         createdAt: new Date().toISOString(),
         loggedByEmployee: true
-      };
-
-      await saveToFirebase(`tasks/${taskId}`, taskData);
-
+      });
       setEmployeeNewTask({
         taskName: '',
         timeMinutes: 10,
@@ -575,43 +522,43 @@ const SiteLog = () => {
     };
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100">
-        <div className="bg-white border-b border-green-200 sticky top-0 z-10">
-          <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
+      <div style={{ minHeight: '100vh', background: '#f8f9fa', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', position: 'sticky', top: 0, zIndex: 10 }}>
+          <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h1 className="text-2xl font-bold text-green-900">SiteLog</h1>
-              <p className="text-xs text-green-700">{selectedEmployeeView}</p>
+              <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1a202c', margin: 0 }}>SiteLog</h1>
+              <p style={{ fontSize: '12px', color: '#718096', margin: '4px 0 0 0' }}>{selectedEmployeeView}</p>
             </div>
             <button
               onClick={() => {
                 setAppState('modeSelect');
                 setSelectedEmployeeView('');
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 font-medium text-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', background: '#fed7d7', color: '#c53030', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
             >
               <LogOut size={16} /> Logout
             </button>
           </div>
         </div>
 
-        <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
-          {/* Employee Task Entry */}
-          <div className="bg-white border-2 border-green-300 rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-green-900 mb-4">Log Your Time</h2>
-            <div className="space-y-4">
+        <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          {/* Log Time Form */}
+          <div style={{ background: 'white', border: '2px solid #48bb78', borderRadius: '10px', padding: '24px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Log Your Time</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <input
                 type="text"
                 placeholder="What did you work on?"
                 value={employeeNewTask.taskName}
                 onChange={(e) => setEmployeeNewTask({ ...employeeNewTask, taskName: e.target.value })}
                 onKeyPress={(e) => e.key === 'Enter' && handleEmployeeAddTask()}
-                className="w-full px-3 py-2 border border-green-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                style={{ width: '100%', padding: '12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}
               />
-              <div className="grid grid-cols-3 gap-3">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                 <select
                   value={employeeNewTask.timeMinutes}
                   onChange={(e) => setEmployeeNewTask({ ...employeeNewTask, timeMinutes: Number(e.target.value) })}
-                  className="px-3 py-2 border border-green-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
                   {[10, 20, 30, 40, 50, 60, 90, 120].map(min => (
                     <option key={min} value={min}>{min} min</option>
@@ -621,12 +568,12 @@ const SiteLog = () => {
                   type="date"
                   value={employeeNewTask.date}
                   onChange={(e) => setEmployeeNewTask({ ...employeeNewTask, date: e.target.value })}
-                  className="px-3 py-2 border border-green-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 />
                 <select
                   value={employeeNewTask.scope}
                   onChange={(e) => setEmployeeNewTask({ ...employeeNewTask, scope: e.target.value })}
-                  className="px-3 py-2 border border-green-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  style={{ padding: '10px 12px', border: '1px solid #cbd5e0', borderRadius: '6px', fontSize: '13px' }}
                 >
                   <option value="in-scope">In-Scope</option>
                   <option value="out-of-scope">Out-of-Scope</option>
@@ -634,36 +581,36 @@ const SiteLog = () => {
               </div>
               <button
                 onClick={handleEmployeeAddTask}
-                className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md flex items-center justify-center gap-2 transition"
+                style={{ width: '100%', padding: '12px 16px', background: '#48bb78', color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
               >
                 <Plus size={18} /> Log Time
               </button>
             </div>
           </div>
 
-          {/* Assigned Tasks */}
+          {/* Tasks List */}
           <div>
-            <h2 className="text-xl font-semibold text-green-900 mb-4">Your Tasks</h2>
+            <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1a202c', marginBottom: '16px', margin: '0 0 16px 0' }}>Your Tasks</h2>
             {tasks.filter(t => t.employee === selectedEmployeeView).length === 0 ? (
-              <p className="text-center text-green-700 py-8">No tasks assigned yet</p>
+              <p style={{ textAlign: 'center', color: '#718096', padding: '32px 0', margin: 0 }}>No tasks assigned yet</p>
             ) : (
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {tasks
                   .filter(t => t.employee === selectedEmployeeView)
                   .map(task => (
-                    <div key={task.id} className="bg-white border-l-4 border-green-500 rounded-lg p-4">
-                      <p className="font-semibold text-slate-900">{task.taskName}</p>
-                      <div className="text-sm text-slate-600 mt-2 space-y-1">
-                        <p><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
-                        <p><strong>Date:</strong> {task.date}</p>
-                        <p>
+                    <div key={task.id} style={{ background: 'white', borderLeft: '4px solid #48bb78', borderRadius: '6px', padding: '16px' }}>
+                      <p style={{ fontWeight: '600', color: '#1a202c', margin: '0 0 8px 0', fontSize: '14px' }}>{task.taskName}</p>
+                      <div style={{ fontSize: '12px', color: '#718096', lineHeight: '1.6' }}>
+                        <p style={{ margin: '4px 0' }}><strong>Time:</strong> {task.timeMinutes} min ({(task.timeMinutes / 60).toFixed(2)} hrs)</p>
+                        <p style={{ margin: '4px 0' }}><strong>Date:</strong> {task.date}</p>
+                        <p style={{ margin: '4px 0' }}>
                           <strong>Scope:</strong> 
-                          <span className={`ml-1 font-medium ${task.scope === 'in-scope' ? 'text-green-600' : 'text-orange-600'}`}>
+                          <span style={{ marginLeft: '4px', fontWeight: '600', color: task.scope === 'in-scope' ? '#22863a' : '#d97706' }}>
                             {task.scope === 'in-scope' ? 'In-Scope' : 'Out-of-Scope'}
                           </span>
                         </p>
                         {task.loggedByEmployee && (
-                          <p className="text-xs text-blue-600 mt-2">✓ You logged this</p>
+                          <p style={{ margin: '4px 0', color: '#667eea' }}>✓ You logged this</p>
                         )}
                       </div>
                     </div>
